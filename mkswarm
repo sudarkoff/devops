@@ -1,0 +1,37 @@
+#!/bin/sh
+
+set -o errexit
+set -o pipefail
+
+if [ $# == 0 ] || [ "$1" == "-h" ] || [ "$1" == "--help" ]; then
+    echo "Create a swarm of the specified number of nodes (default: 3) on OpenStack.\n"
+    echo "Usage: $(basename $0) <swarm-name> [number-of-nodes]\n"
+    exit 0
+fi
+
+NAME=${1}
+NODES=${2:-3}
+
+SWARM_TOKEN=$(docker run swarm create)
+echo "Swarm token: '${SWARM_TOKEN}'"
+echo "OpenStack:"
+echo "\tflavor: '${OS_FLAVOR_NAME}'"
+echo "\t image: '${OS_IMAGE_NAME}'"
+
+for N in $(eval echo {1..$NODES})
+do
+    echo "Create machine '${NAME}${N}' and join to swarm '${SWARM_TOKEN}'"
+    docker-machine create \
+        --driver=openstack \
+        --openstack-flavor-name=$OS_FLAVOR_NAME \
+        --openstack-image-name=$OS_IMAGE_NAME \
+        --openstack-sec-groups=$OS_SEC_GROUPS \
+        --openstack-ssh-user=$OS_SSH_USER \
+        ${NAME}${N}
+    docker run -d swarm join \
+        --advertise $(docker-machine ip ${NAME}${N}):55555 token://${SWARM_TOKEN}
+done
+
+# Manually "elect" the master until swarm can do it on its own
+eval $(docker-machine env ${NAME}1)
+docker run -d -p 10000:2375 swarm manage token://${SWARM_TOKEN}
